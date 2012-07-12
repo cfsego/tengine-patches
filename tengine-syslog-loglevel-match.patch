@@ -1,0 +1,125 @@
+diff --git a/src/core/ngx_log.c b/src/core/ngx_log.c
+index 176c2de..9a5a9e3 100644
+--- a/src/core/ngx_log.c
++++ b/src/core/ngx_log.c
+@@ -156,6 +156,7 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
+         if (!(log->syslog->fd == NGX_INVALID_FILE
+             && ngx_cached_time->sec < log->syslog->next_try))
+         {
++            log->syslog->level = (ngx_int_t) level - 1;
+             (void) ngx_write_syslog(log->syslog, errstr, p - errstr);
+         }
+     } else {
+@@ -414,6 +415,9 @@ ngx_log_set_levels(ngx_conf_t *cf, ngx_log_t *log)
+ {
+     ngx_uint_t   i, n, d, found;
+     ngx_str_t   *value;
++#if (NGX_SYSLOG)
++    u_char      *p, pri[5];
++#endif
+ 
+     value = cf->args->elts;
+ 
+@@ -463,6 +467,33 @@ ngx_log_set_levels(ngx_conf_t *cf, ngx_log_t *log)
+         log->log_level = NGX_LOG_DEBUG_ALL;
+     }
+ 
++#if (NGX_SYSLOG)
++
++    /* build all the pri strings for each log level */
++
++    if (log->syslog == NULL) {
++        return NGX_CONF_OK;
++    }
++
++    log->syslog->syslog_pri =
++            ngx_palloc(cf->pool, sizeof(ngx_str_t) *
++                                       (NGX_LOG_DEBUG - NGX_LOG_STDERR));
++    if (log->syslog->syslog_pri == NULL) {
++        return NGX_CONF_ERROR;
++    }
++
++    for (i = NGX_SYSLOG_EMERG; i <= NGX_SYSLOG_DEBUG; i++) {
++        p = ngx_snprintf(pri, 5, "<%d>", (log->syslog->pri_n & 0x7ffffff8) | i);
++        log->syslog->syslog_pri[i].len = p - pri;
++        log->syslog->syslog_pri[i].data = ngx_pcalloc(cf->pool, p - pri);
++        if (log->syslog->syslog_pri[i].data == NULL) {
++            return NGX_CONF_ERROR;
++        }
++        ngx_memcpy(log->syslog->syslog_pri[i].data, pri, p - pri);
++    }
++
++#endif
++
+     return NGX_CONF_OK;
+ }
+ 
+diff --git a/src/core/ngx_log.h b/src/core/ngx_log.h
+index 2e3d7c7..afbc2e8 100644
+--- a/src/core/ngx_log.h
++++ b/src/core/ngx_log.h
+@@ -50,8 +50,10 @@
+ typedef struct {
+     time_t               next_try;
+     ngx_addr_t           addr;
+-    ngx_str_t            syslog_pri;      /* pri field comput for syslog */
++    ngx_int_t            pri_n;
++    ngx_str_t           *syslog_pri;      /* pri field comput for syslog */
+     ngx_str_t            ident;
++    ngx_int_t            level;
+ 
+     ngx_socket_t         fd;
+     ngx_str_t            header;
+diff --git a/src/os/unix/ngx_syslog.c b/src/os/unix/ngx_syslog.c
+index bf1187a..7574db4 100644
+--- a/src/os/unix/ngx_syslog.c
++++ b/src/os/unix/ngx_syslog.c
+@@ -317,17 +317,24 @@ ngx_log_set_syslog(ngx_pool_t *pool, ngx_str_t *value, ngx_log_t *log)
+         return NGX_ERROR;
+     }
+ 
+-    p = ngx_snprintf(pri, 5, "<%d>", facility + loglevel);
+-    log->syslog->syslog_pri.len = p - pri;
+-    log->syslog->syslog_pri.data = ngx_pcalloc(pool, p - pri);
+-    if (log->syslog->syslog_pri.data == NULL) {
++    log->syslog->syslog_pri = ngx_pcalloc(pool, sizeof(ngx_str_t));
++    if (log->syslog->syslog_pri == NULL) {
+         return NGX_ERROR;
+     }
+-    ngx_memcpy(log->syslog->syslog_pri.data, pri, p - pri);
++
++    log->syslog->pri_n = facility + loglevel;
++    p = ngx_snprintf(pri, 5, "<%d>", log->syslog->pri_n);
++    log->syslog->syslog_pri->len = p - pri;
++    log->syslog->syslog_pri->data = ngx_pcalloc(pool, p - pri);
++    if (log->syslog->syslog_pri->data == NULL) {
++        return NGX_ERROR;
++    }
++    ngx_memcpy(log->syslog->syslog_pri->data, pri, p - pri);
+ 
+     log->syslog->addr = addr;
+     log->syslog->ident = ident;
+     log->syslog->fd = -1;
++    log->syslog->level = -1;
+     log->syslog->header.data = log->syslog->header_buf;
+ 
+     return NGX_OK;
+@@ -418,9 +425,15 @@ ngx_write_syslog(ngx_syslog_t *task, u_char *buf, size_t len)
+         ngx_syslog_prebuild_header(task);
+     }
+ 
+-    iovs[0].iov_base = (void *) task->syslog_pri.data;
+-    iovs[0].iov_len = task->syslog_pri.len;
+-    l = task->syslog_pri.len;
++    if (task->level == -1) {
++        iovs[0].iov_base = (void *) task->syslog_pri->data;
++        iovs[0].iov_len = task->syslog_pri->len;
++        l = task->syslog_pri->len;
++    } else {
++        iovs[0].iov_base = (void *) task->syslog_pri[task->level].data;
++        iovs[0].iov_len = task->syslog_pri[task->level].len;
++        l = task->syslog_pri[task->level].len;
++    }
+ 
+     iovs[1].iov_base = (void *) ngx_cached_syslog_time.data;
+     iovs[1].iov_len = ngx_cached_syslog_time.len;
