@@ -40,7 +40,7 @@ index 176c2de..9a5a9e3 100644
 +    }
 +
 +    for (i = NGX_SYSLOG_EMERG; i <= NGX_SYSLOG_DEBUG; i++) {
-+        p = ngx_snprintf(pri, 5, "<%d>", (log->syslog->pri_n & 0x7ffffff8) | i);
++        p = ngx_snprintf(pri, 5, "<%i>", (log->syslog->pri_n & 0x7ffffff8) | i);
 +        log->syslog->syslog_pri[i].len = p - pri;
 +        log->syslog->syslog_pri[i].data = ngx_pcalloc(cf->pool, p - pri);
 +        if (log->syslog->syslog_pri[i].data == NULL) {
@@ -78,7 +78,7 @@ index bf1187a..7574db4 100644
          return NGX_ERROR;
      }
  
--    p = ngx_snprintf(pri, 5, "<%d>", facility + loglevel);
+-    p = ngx_snprintf(pri, 5, "<%i>", facility + loglevel);
 -    log->syslog->syslog_pri.len = p - pri;
 -    log->syslog->syslog_pri.data = ngx_pcalloc(pool, p - pri);
 -    if (log->syslog->syslog_pri.data == NULL) {
@@ -89,7 +89,7 @@ index bf1187a..7574db4 100644
 -    ngx_memcpy(log->syslog->syslog_pri.data, pri, p - pri);
 +
 +    log->syslog->pri_n = facility + loglevel;
-+    p = ngx_snprintf(pri, 5, "<%d>", log->syslog->pri_n);
++    p = ngx_snprintf(pri, 5, "<%i>", log->syslog->pri_n);
 +    log->syslog->syslog_pri->len = p - pri;
 +    log->syslog->syslog_pri->data = ngx_pcalloc(pool, p - pri);
 +    if (log->syslog->syslog_pri->data == NULL) {
